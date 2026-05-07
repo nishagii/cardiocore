@@ -1,0 +1,57 @@
+﻿{
+  "name": "CardioCore",
+  "slug": "cardiocore",
+  "version": "1.0.0",
+  "description": "Agentic cardiac assessment MCP suite. Analyzes 12-lead ECGs, estimates ejection fraction from echo video, performs structural cardiac analysis, computes HEART risk scores, and outputs validated FHIR R4 DiagnosticReports. Powered by Gemma 4 on AMD MI300X.",
+  "author": "Binula",
+  "healthcare_domain": "Cardiology",
+  "fhir_resources_produced": ["DiagnosticReport", "Observation", "Bundle"],
+  "sharp_context_required": true,
+  "sharp_context_fields": ["X-FHIR-Server-URL", "X-FHIR-Access-Token", "X-Patient-Id"],
+  "endpoint_base": "http://INSTANCE_B_IP:8000",
+  "tools": [
+    {
+      "name": "analyze_ecg_leads",
+      "display_name": "ECG Lead Analysis",
+      "description": "Classify 12-lead ECG rhythm from image (PNG/JPEG) or CSV signal. Returns rhythm class, SNOMED code, confidence, clinical flags, and FHIR Observation.",
+      "endpoint": "/tools/analyze_ecg_leads",
+      "method": "POST",
+      "input_type": "multipart/form-data"
+    },
+    {
+      "name": "estimate_ejection_fraction",
+      "display_name": "Echo EF Estimation",
+      "description": "Estimate left ventricular ejection fraction from echocardiogram video. Returns EF%, HF classification, SNOMED code, and FHIR Observation.",
+      "endpoint": "/tools/estimate_ejection_fraction",
+      "method": "POST",
+      "input_type": "multipart/form-data"
+    },
+    {
+      "name": "analyze_cardiac_structure",
+      "display_name": "Cardiac Structure Analysis",
+      "description": "Analyze cardiac structural features from echo video. Returns LV size, wall thickness, chamber flags.",
+      "endpoint": "/tools/analyze_cardiac_structure",
+      "method": "POST",
+      "input_type": "multipart/form-data"
+    },
+    {
+      "name": "risk_stratify",
+      "display_name": "Cardiac Risk Stratification",
+      "description": "Compute HEART score and triage tier. Accepts ECG result, Echo result, and clinical context. Returns score 0-10, Urgent/Routine/Normal tier.",
+      "endpoint": "/tools/risk_stratify",
+      "method": "POST",
+      "input_type": "application/json"
+    },
+    {
+      "name": "generate_cardiac_report",
+      "display_name": "FHIR Cardiac Report",
+      "description": "Generate validated FHIR R4 DiagnosticReport bundle from all analysis results. Final output of the CardioCore pipeline.",
+      "endpoint": "/tools/generate_cardiac_report",
+      "method": "POST",
+      "input_type": "application/json"
+    }
+  ],
+  "demo_video_url": "TODO: add YouTube link after Day 5",
+  "github_url": "https://github.com/Bin4yi/cardiocore",
+  "license": "Apache-2.0"
+}

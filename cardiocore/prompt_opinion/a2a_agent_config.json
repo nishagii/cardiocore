@@ -1,0 +1,12 @@
+﻿{
+  "name": "Cardiology Triage Agent",
+  "description": "Orchestrates CardioCore MCP tools to produce a complete cardiac assessment for any patient. Chains ECG analysis, echo EF, structural analysis, risk stratification, and FHIR report generation automatically.",
+  "workflow": [
+    { "step": 1, "tool": "analyze_ecg_leads",             "description": "Analyze ECG rhythm" },
+    { "step": 2, "tool": "estimate_ejection_fraction",     "description": "Estimate ejection fraction" },
+    { "step": 3, "tool": "analyze_cardiac_structure",      "description": "Analyze cardiac structure" },
+    { "step": 4, "tool": "risk_stratify",                  "description": "Compute HEART score and triage tier" },
+    { "step": 5, "tool": "generate_cardiac_report",        "description": "Generate FHIR DiagnosticReport bundle" }
+  ],
+  "escalation_rule": "If triage_tier equals Urgent, notify on-call cardiologist via A2A"
+}

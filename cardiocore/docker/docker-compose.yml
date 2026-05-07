@@ -1,0 +1,19 @@
+﻿version: "3.8"
+
+services:
+  cardiocore:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.mcp
+    container_name: cardiocore_mcp
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../data:/app/data
+      - ../models:/app/models
+      - ../demo/output:/app/demo/output
+    env_file:
+      - ../.env
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
