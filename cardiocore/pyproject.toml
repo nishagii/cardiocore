@@ -1,5 +1,4 @@
-python3 -c "
-content = '''[build-system]
+[build-system]
 requires = [\"setuptools>=68\", \"wheel\"]
 build-backend = \"setuptools.backends.legacy:build\"
 
@@ -36,7 +35,3 @@ where = [\".\"]
 [tool.pytest.ini_options]
 asyncio_mode = \"auto\"
 testpaths = [\"tests\"]
-'''
-open('pyproject.toml', 'w').write(content)
-print('Done')
-"
