@@ -25,6 +25,7 @@ dependencies = [
     "scikit-learn>=1.5",
     "wfdb>=4.1",
     "accelerate>=0.30",
+    "openai>=1.30",
 ]
 
 [project.optional-dependencies]
