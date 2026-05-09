@@ -1,6 +1,6 @@
 [build-system]
 requires = ["setuptools>=68", "wheel"]
-build-backend = "setuptools.backends.legacy:build"
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "cardiocore"
@@ -24,6 +24,7 @@ dependencies = [
     "python-dotenv>=1.0",
     "scikit-learn>=1.5",
     "wfdb>=4.1",
+    "accelerate>=0.30",
 ]
 
 [project.optional-dependencies]
