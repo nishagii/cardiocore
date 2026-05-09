@@ -99,40 +99,80 @@ def _extract_json(text: str) -> dict:
 
 
 def analyze_ecg_image(image_bytes: bytes) -> dict:
-    """Run PULSE-7B on an ECG image. Return the structured result."""
+    """Run PULSE-7B on an ECG image."""
+
+    from llava.constants import (
+        IMAGE_TOKEN_INDEX,
+        DEFAULT_IMAGE_TOKEN,
+    )
+
+    from llava.conversation import conv_templates
+
+    from llava.mm_utils import (
+        process_images,
+        tokenizer_image_token,
+    )
+
     img = Image.open(io.BytesIO(image_bytes)).convert('RGB')
 
     try:
         model, processor = _load_model()
 
-        # LLaVA-1.5 chat template
-        conversation = [
-            {
-                'role': 'user',
-                'content': [
-                    {'type': 'image'},
-                    {'type': 'text', 'text': ECG_PROMPT},
-                ],
-            },
-        ]
-        prompt = processor.apply_chat_template(
-            conversation, add_generation_prompt=True
+        tokenizer = processor["tokenizer"]
+        image_processor = processor["image_processor"]
+
+        conv = conv_templates["llava_v1"].copy()
+
+        inp = DEFAULT_IMAGE_TOKEN + '\n' + ECG_PROMPT
+
+        conv.append_message(conv.roles[0], inp)
+        conv.append_message(conv.roles[1], None)
+
+        prompt = conv.get_prompt()
+
+        input_ids = tokenizer_image_token(
+            prompt,
+            tokenizer,
+            IMAGE_TOKEN_INDEX,
+            return_tensors='pt',
+        ).unsqueeze(0).cuda()
+
+        image_tensor = process_images(
+            [img],
+            image_processor,
+            model.config
         )
 
-        inputs = processor(
-            images=img, text=prompt, return_tensors='pt'
-        ).to(model.device, torch.float16)
-
-        with torch.no_grad():
-            out = model.generate(
-                **inputs,
-                max_new_tokens=300,
-                do_sample=False,
+        if isinstance(image_tensor, list):
+            image_tensor = [
+                img.to(model.device, dtype=torch.float16)
+                for img in image_tensor
+            ]
+        else:
+            image_tensor = image_tensor.to(
+                model.device,
+                dtype=torch.float16
             )
 
-        # Decode only the new tokens (skip the prompt echo)
-        input_len = inputs['input_ids'].shape[1]
-        decoded = processor.decode(out[0][input_len:], skip_special_tokens=True)
+        with torch.inference_mode():
+            output_ids = model.generate(
+                input_ids,
+                images=image_tensor,
+                image_sizes=[img.size],
+                do_sample=False,
+                temperature=0,
+                max_new_tokens=256,
+            )
+
+        decoded = tokenizer.batch_decode(
+            output_ids,
+            skip_special_tokens=True
+        )[0]
+
+        print("\n========== RAW PULSE OUTPUT ==========")
+        print(decoded)
+        print("=====================================\n")
+
         result = _extract_json(decoded)
 
     except Exception as e:
@@ -140,6 +180,7 @@ def analyze_ecg_image(image_bytes: bytes) -> dict:
         result = {}
 
     cls = result.get('rhythm_class', 'NORM').upper().strip()
+
     if cls not in ECG_CLASSES:
         cls = 'NORM'
 
@@ -150,16 +191,28 @@ def analyze_ecg_image(image_bytes: bytes) -> dict:
         confidence = 0.5
 
     clinical_flags = result.get('clinical_flags', [])
+
     if not isinstance(clinical_flags, list):
         clinical_flags = [str(clinical_flags)]
 
-    snomed_code, snomed_desc = ECG_SNOMED.get(cls, ECG_SNOMED['NORM'])
+    snomed_code, snomed_desc = ECG_SNOMED.get(
+        cls,
+        ECG_SNOMED['NORM']
+    )
+
     return {
-        'rhythm_class':       cls,
-        'confidence':         confidence,
-        'all_class_probs':    {c: 0.0 for c in ECG_CLASSES},  # PULSE doesn't natively output per-class probs
-        'snomed_code':        snomed_code,
+        'rhythm_class': cls,
+        'confidence': confidence,
+        'all_class_probs': {
+            c: 0.0 for c in ECG_CLASSES
+        },
+        'snomed_code': snomed_code,
         'snomed_description': snomed_desc,
-        'clinical_flags':     clinical_flags[:4],
-        'reasoning':          str(result.get('reasoning', f'Classified as {cls}')),
+        'clinical_flags': clinical_flags[:4],
+        'reasoning': str(
+            result.get(
+                'reasoning',
+                f'Classified as {cls}'
+            )
+        ),
     }
