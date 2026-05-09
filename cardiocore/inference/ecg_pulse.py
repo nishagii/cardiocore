@@ -2,10 +2,10 @@
 PULSE-7B inference for ECG images.
 Loaded once at specialist server startup, kept in GPU memory.
 """
-
 import io
 import json
 import os
+from typing import Optional
 
 import torch
 from PIL import Image
@@ -16,10 +16,9 @@ from inference.config import ECG_CLASSES, ECG_SNOMED
 _MODEL = None
 _PROCESSOR = None
 
-_MODEL_ID = os.getenv(
-    'PULSE_MODEL_ID',
-    'PULSE-ECG/PULSE-7B'
-)
+# PULSE-7B is a LLaVA-architecture VLM. Verify exact class against the
+# model card README before deployment if it has been updated.
+_MODEL_ID = os.getenv('PULSE_MODEL_ID', 'PULSE-ECG/PULSE-7B')
 
 
 ECG_PROMPT = """You are a clinical cardiologist analyzing a 12-lead ECG image.
@@ -37,8 +36,7 @@ Respond with valid JSON only, no other text:
   "confidence": <number between 0 and 1>,
   "clinical_flags": ["list specific findings, max 4"],
   "reasoning": "one sentence explanation"
-}
-"""
+}"""
 
 
 def _load_model():
@@ -49,7 +47,10 @@ def _load_model():
     if _MODEL is not None:
         return _MODEL, _PROCESSOR
 
-    from transformers import AutoProcessor, AutoModelForCausalLM
+    from transformers import AutoProcessor
+    from transformers.dynamic_module_utils import (
+        get_class_from_dynamic_module,
+    )
 
     print(f'Loading {_MODEL_ID}... (~14GB, first run only)')
 
@@ -58,7 +59,13 @@ def _load_model():
         trust_remote_code=True,
     )
 
-    _MODEL = AutoModelForCausalLM.from_pretrained(
+    # Load custom class directly from model repo
+    model_class = get_class_from_dynamic_module(
+        "modeling_llava.LlavaLlamaForCausalLM",
+        _MODEL_ID,
+    )
+
+    _MODEL = model_class.from_pretrained(
         _MODEL_ID,
         torch_dtype=torch.float16,
         device_map='auto',
@@ -74,38 +81,34 @@ def _load_model():
 
 
 def _extract_json(text: str) -> dict:
-    """Extract JSON object from model response."""
-
+    """Find and parse JSON block in PULSE-7B's response."""
     text = text.strip()
-
     if '```' in text:
         for part in text.split('```'):
             part = part.strip().lstrip('json').strip()
             try:
                 return json.loads(part)
             except Exception:
-                pass
-
+                continue
+    # Fallback: find first { ... } block
     start = text.find('{')
     end = text.rfind('}') + 1
-
     if start >= 0 and end > start:
         try:
             return json.loads(text[start:end])
         except Exception:
             pass
-
     return {}
 
 
 def analyze_ecg_image(image_bytes: bytes) -> dict:
-    """Run PULSE-7B on ECG image."""
-
+    """Run PULSE-7B on an ECG image. Return the structured result."""
     img = Image.open(io.BytesIO(image_bytes)).convert('RGB')
 
     try:
         model, processor = _load_model()
 
+        # LLaVA-1.5 chat template
         conversation = [
             {
                 'role': 'user',
@@ -115,83 +118,51 @@ def analyze_ecg_image(image_bytes: bytes) -> dict:
                 ],
             },
         ]
-
         prompt = processor.apply_chat_template(
-            conversation,
-            add_generation_prompt=True,
+            conversation, add_generation_prompt=True
         )
 
         inputs = processor(
-            images=img,
-            text=prompt,
-            return_tensors='pt',
-        )
-
-        inputs = {
-            k: v.to(model.device)
-            if hasattr(v, 'to') else v
-            for k, v in inputs.items()
-        }
+            images=img, text=prompt, return_tensors='pt'
+        ).to(model.device, torch.float16)
 
         with torch.no_grad():
-            output = model.generate(
+            out = model.generate(
                 **inputs,
                 max_new_tokens=300,
                 do_sample=False,
-                temperature=0.0,
             )
 
+        # Decode only the new tokens (skip the prompt echo)
         input_len = inputs['input_ids'].shape[1]
-
-        decoded = processor.decode(
-            output[0][input_len:],
-            skip_special_tokens=True,
-        )
-
-        print(f'PULSE RAW OUTPUT:\n{decoded}\n')
-
+        decoded = processor.decode(out[0][input_len:], skip_special_tokens=True)
         result = _extract_json(decoded)
 
     except Exception as e:
         print(f'PULSE-7B inference failed: {e}')
         result = {}
 
-    cls = str(
-        result.get('rhythm_class', 'NORM')
-    ).upper().strip()
-
+    cls = result.get('rhythm_class', 'NORM').upper().strip()
     if cls not in ECG_CLASSES:
         cls = 'NORM'
 
     try:
         confidence = float(result.get('confidence', 0.5))
         confidence = max(0.0, min(1.0, confidence))
-    except Exception:
+    except (TypeError, ValueError):
         confidence = 0.5
 
     clinical_flags = result.get('clinical_flags', [])
-
     if not isinstance(clinical_flags, list):
         clinical_flags = [str(clinical_flags)]
 
-    snomed_code, snomed_desc = ECG_SNOMED.get(
-        cls,
-        ECG_SNOMED['NORM']
-    )
-
+    snomed_code, snomed_desc = ECG_SNOMED.get(cls, ECG_SNOMED['NORM'])
     return {
-        'rhythm_class': cls,
-        'confidence': confidence,
-        'all_class_probs': {
-            c: 0.0 for c in ECG_CLASSES
-        },
-        'snomed_code': snomed_code,
+        'rhythm_class':       cls,
+        'confidence':         confidence,
+        'all_class_probs':    {c: 0.0 for c in ECG_CLASSES},  # PULSE doesn't natively output per-class probs
+        'snomed_code':        snomed_code,
         'snomed_description': snomed_desc,
-        'clinical_flags': clinical_flags[:4],
-        'reasoning': str(
-            result.get(
-                'reasoning',
-                f'Classified as {cls}'
-            )
-        ),
+        'clinical_flags':     clinical_flags[:4],
+        'reasoning':          str(result.get('reasoning', f'Classified as {cls}')),
     }
