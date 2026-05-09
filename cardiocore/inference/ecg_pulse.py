@@ -40,37 +40,34 @@ Respond with valid JSON only, no other text:
 
 
 def _load_model():
-    """Lazy-load PULSE-7B on first call."""
+    """Load PULSE-7B using native LLaVA runtime."""
 
     global _MODEL, _PROCESSOR
 
     if _MODEL is not None:
         return _MODEL, _PROCESSOR
 
-    from transformers import AutoProcessor
-    from transformers.dynamic_module_utils import (
-        get_class_from_dynamic_module,
-    )
+    print(f'Loading {_MODEL_ID} with LLaVA runtime...')
 
-    print(f'Loading {_MODEL_ID}... (~14GB, first run only)')
+    from llava.model.builder import load_pretrained_model
+    from llava.mm_utils import get_model_name_from_path
 
-    _PROCESSOR = AutoProcessor.from_pretrained(
-        _MODEL_ID,
-        trust_remote_code=True,
-    )
+    model_name = get_model_name_from_path(_MODEL_ID)
 
-    # Load custom class directly from model repo
-    model_class = get_class_from_dynamic_module(
-        "modeling_llava.LlavaLlamaForCausalLM",
-        _MODEL_ID,
-    )
+    tokenizer, model, image_processor, context_len = \
+        load_pretrained_model(
+            model_path=_MODEL_ID,
+            model_base=None,
+            model_name=model_name,
+            device="cuda",
+        )
 
-    _MODEL = model_class.from_pretrained(
-        _MODEL_ID,
-        torch_dtype=torch.float16,
-        device_map='auto',
-        trust_remote_code=True,
-    ).eval()
+    _MODEL = model
+    _PROCESSOR = {
+        "tokenizer": tokenizer,
+        "image_processor": image_processor,
+        "context_len": context_len,
+    }
 
     print(
         f'PULSE-7B ready. GPU: '
