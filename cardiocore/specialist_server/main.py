@@ -10,16 +10,26 @@ _pulse_loaded = False
 @asynccontextmanager
 async def lifespan(app):
     global _pulse_loaded
-    print('Loading PULSE-7B for ECG analysis...')
-    try:
-        from inference.ecg_pulse import _load_model
-        _load_model()
-        _pulse_loaded = True
-        print(f'PULSE-7B ready. GPU: {torch.cuda.memory_allocated()/1e9:.2f}GB')
-    except Exception as e:
-        print(f'WARNING: PULSE-7B failed to load: {e}')
-        _pulse_loaded = False
+
+    print('========== STARTING PULSE LOAD ==========')
+
+    from inference.ecg_pulse import _load_model
+
+    print('IMPORT SUCCESS')
+
+    model, processor = _load_model()
+
+    print('MODEL LOAD SUCCESS')
+
+    _pulse_loaded = True
+
+    print(
+        f'PULSE-7B ready. GPU: '
+        f'{torch.cuda.memory_allocated()/1e9:.2f}GB'
+    )
+
     print('Specialist server ready.')
+
     yield
 
 
