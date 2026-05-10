@@ -116,7 +116,7 @@ def analyze_echo(video_path: str) -> dict:
     """
     # Step 1: extract frames. If this fails, we cannot proceed at all.
     try:
-        frames = extract_frames(video_path, n=8)
+        frames = extract_frames(video_path, n=2)
     except Exception as e:
         print(f'Frame extraction failed for {video_path}: {e}')
         return _default_result(

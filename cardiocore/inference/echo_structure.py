@@ -15,7 +15,7 @@ Assess the following and respond with JSON:
   "reasoning": "one sentence"
 }}'''
 
-def extract_frames(video_path: str, n: int = 8) -> list:
+def extract_frames(video_path: str, n: int = 2) -> list:
     import imageio
     reader = imageio.get_reader(video_path)
     total  = reader.count_frames()
