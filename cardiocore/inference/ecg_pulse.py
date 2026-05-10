@@ -131,10 +131,7 @@ def analyze_ecg_image(image_bytes: bytes) -> dict:
 
     from llava.conversation import conv_templates
 
-    from llava.mm_utils import (
-        process_images,
-        tokenizer_image_token,
-    )
+    from llava.mm_utils import tokenizer_image_token
 
     img = Image.open(
         io.BytesIO(image_bytes)
@@ -163,28 +160,15 @@ def analyze_ecg_image(image_bytes: bytes) -> dict:
             return_tensors="pt",
         ).unsqueeze(0).to(model.device)
 
-        image_tensor = process_images(
-            [img],
-            image_processor,
-            model.config,
+        image_tensor = image_processor.preprocess(
+            img,
+            return_tensors="pt"
+        )["pixel_values"]
+
+        image_tensor = image_tensor.to(
+            model.device,
+            dtype=torch.float16
         )
-
-        if isinstance(image_tensor, list):
-
-            image_tensor = [
-                im.to(
-                    model.device,
-                    dtype=torch.float16
-                )
-                for im in image_tensor
-            ]
-
-        else:
-
-            image_tensor = image_tensor.to(
-                model.device,
-                dtype=torch.float16
-            )
 
         with torch.inference_mode():
 
