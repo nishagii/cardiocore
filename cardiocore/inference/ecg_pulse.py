@@ -148,7 +148,7 @@ def analyze_ecg_image(image_bytes: bytes) -> dict:
         tokenizer = processor["tokenizer"]
         image_processor = processor["image_processor"]
 
-        conv = conv_templates["llava_v1"].copy()
+        conv = conv_templates["llava_v0"].copy()
 
         inp = DEFAULT_IMAGE_TOKEN + "\n" + ECG_PROMPT
 
@@ -181,7 +181,8 @@ def analyze_ecg_image(image_bytes: bytes) -> dict:
                 images=image_tensor,
                 image_sizes=[img.size],
                 do_sample=False,
-                temperature=0,
+                temperature=0.2,
+                top_p=0.9
                 max_new_tokens=256,
             )
 
