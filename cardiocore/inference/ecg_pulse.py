@@ -66,7 +66,7 @@ def _load_model():
             model_path=_MODEL_ID,
             model_base=None,
             model_name=model_name,
-            device="cuda",
+            device="auto",
         )
 
     _MODEL = model
@@ -161,7 +161,7 @@ def analyze_ecg_image(image_bytes: bytes) -> dict:
             tokenizer,
             IMAGE_TOKEN_INDEX,
             return_tensors="pt",
-        ).unsqueeze(0).cuda()
+        ).unsqueeze(0).to(model.device)
 
         image_tensor = process_images(
             [img],
