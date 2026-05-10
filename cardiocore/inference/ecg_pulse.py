@@ -182,7 +182,7 @@ def analyze_ecg_image(image_bytes: bytes) -> dict:
                 image_sizes=[img.size],
                 do_sample=False,
                 temperature=0.2,
-                top_p=0.9
+                top_p=0.9,
                 max_new_tokens=256,
             )
 
