@@ -1,11 +1,11 @@
 """
 PULSE-7B inference for ECG images.
-Loaded once at specialist server startup, kept in GPU memory.
+Loaded once at specialist server startup and kept in GPU memory.
 """
+
 import io
 import json
 import os
-from typing import Optional
 
 import torch
 from PIL import Image
@@ -16,38 +16,45 @@ from inference.config import ECG_CLASSES, ECG_SNOMED
 _MODEL = None
 _PROCESSOR = None
 
-# PULSE-7B is a LLaVA-architecture VLM. Verify exact class against the
-# model card README before deployment if it has been updated.
-_MODEL_ID = os.getenv('PULSE_MODEL_ID', 'PULSE-ECG/PULSE-7B')
+_MODEL_ID = os.getenv(
+    "PULSE_MODEL_ID",
+    "PULSE-ECG/PULSE-7B"
+)
 
 
-ECG_PROMPT = """You are a clinical cardiologist analyzing a 12-lead ECG image.
+ECG_PROMPT = """
+You are an ECG classification engine.
 
-Classify the rhythm into exactly one of:
-- NORM (normal sinus rhythm)
-- MI (myocardial infarction)
-- STTC (ST-T wave change)
-- CD (conduction disorder)
-- HYP (cardiac hypertrophy)
+Analyze the ECG image carefully.
 
-Respond with valid JSON only, no other text:
+Return ONLY valid JSON.
+
+Do not explain.
+Do not use markdown.
+Do not use code fences.
+
+Schema:
+
 {
   "rhythm_class": "NORM|MI|STTC|CD|HYP",
-  "confidence": <number between 0 and 1>,
-  "clinical_flags": ["list specific findings, max 4"],
-  "reasoning": "one sentence explanation"
-}"""
+  "confidence": 0.0,
+  "clinical_flags": ["finding1", "finding2"],
+  "reasoning": "one sentence"
+}
+"""
 
 
 def _load_model():
-    """Load PULSE-7B using native LLaVA runtime."""
+    """
+    Load PULSE-7B using native LLaVA runtime.
+    """
 
     global _MODEL, _PROCESSOR
 
     if _MODEL is not None:
         return _MODEL, _PROCESSOR
 
-    print(f'Loading {_MODEL_ID} with LLaVA runtime...')
+    print(f"Loading {_MODEL_ID} with LLaVA runtime...")
 
     from llava.model.builder import load_pretrained_model
     from llava.mm_utils import get_model_name_from_path
@@ -63,6 +70,7 @@ def _load_model():
         )
 
     _MODEL = model
+
     _PROCESSOR = {
         "tokenizer": tokenizer,
         "image_processor": image_processor,
@@ -70,36 +78,51 @@ def _load_model():
     }
 
     print(
-        f'PULSE-7B ready. GPU: '
-        f'{torch.cuda.memory_allocated()/1e9:.2f}GB'
+        f"PULSE-7B ready. GPU memory: "
+        f"{torch.cuda.memory_allocated()/1e9:.2f}GB"
     )
 
     return _MODEL, _PROCESSOR
 
 
 def _extract_json(text: str) -> dict:
-    """Find and parse JSON block in PULSE-7B's response."""
+    """
+    Extract JSON object from model output.
+    """
+
     text = text.strip()
-    if '```' in text:
-        for part in text.split('```'):
-            part = part.strip().lstrip('json').strip()
-            try:
-                return json.loads(part)
-            except Exception:
-                continue
-    # Fallback: find first { ... } block
-    start = text.find('{')
-    end = text.rfind('}') + 1
+
+    print("\n========== RAW MODEL OUTPUT ==========")
+    print(text)
+    print("======================================\n")
+
+    start = text.find("{")
+    end = text.rfind("}") + 1
+
     if start >= 0 and end > start:
+
+        candidate = text[start:end]
+
         try:
-            return json.loads(text[start:end])
-        except Exception:
-            pass
+            parsed = json.loads(candidate)
+
+            print("\n========== PARSED JSON ==========")
+            print(parsed)
+            print("=================================\n")
+
+            return parsed
+
+        except Exception as e:
+            print(f"JSON parse failed: {e}")
+            print(candidate)
+
     return {}
 
 
 def analyze_ecg_image(image_bytes: bytes) -> dict:
-    """Run PULSE-7B on an ECG image."""
+    """
+    Run PULSE-7B on ECG image.
+    """
 
     from llava.constants import (
         IMAGE_TOKEN_INDEX,
@@ -113,9 +136,12 @@ def analyze_ecg_image(image_bytes: bytes) -> dict:
         tokenizer_image_token,
     )
 
-    img = Image.open(io.BytesIO(image_bytes)).convert('RGB')
+    img = Image.open(
+        io.BytesIO(image_bytes)
+    ).convert("RGB")
 
     try:
+
         model, processor = _load_model()
 
         tokenizer = processor["tokenizer"]
@@ -123,7 +149,7 @@ def analyze_ecg_image(image_bytes: bytes) -> dict:
 
         conv = conv_templates["llava_v1"].copy()
 
-        inp = DEFAULT_IMAGE_TOKEN + '\n' + ECG_PROMPT
+        inp = DEFAULT_IMAGE_TOKEN + "\n" + ECG_PROMPT
 
         conv.append_message(conv.roles[0], inp)
         conv.append_message(conv.roles[1], None)
@@ -134,27 +160,34 @@ def analyze_ecg_image(image_bytes: bytes) -> dict:
             prompt,
             tokenizer,
             IMAGE_TOKEN_INDEX,
-            return_tensors='pt',
+            return_tensors="pt",
         ).unsqueeze(0).cuda()
 
         image_tensor = process_images(
             [img],
             image_processor,
-            model.config
+            model.config,
         )
 
         if isinstance(image_tensor, list):
+
             image_tensor = [
-                img.to(model.device, dtype=torch.float16)
-                for img in image_tensor
+                im.to(
+                    model.device,
+                    dtype=torch.float16
+                )
+                for im in image_tensor
             ]
+
         else:
+
             image_tensor = image_tensor.to(
                 model.device,
                 dtype=torch.float16
             )
 
         with torch.inference_mode():
+
             output_ids = model.generate(
                 input_ids,
                 images=image_tensor,
@@ -164,55 +197,78 @@ def analyze_ecg_image(image_bytes: bytes) -> dict:
                 max_new_tokens=256,
             )
 
-        decoded = tokenizer.batch_decode(
-            output_ids,
-            skip_special_tokens=True
-        )[0]
+        input_token_len = input_ids.shape[1]
 
-        print("\n========== RAW PULSE OUTPUT ==========")
-        print(decoded)
-        print("=====================================\n")
+        decoded = tokenizer.batch_decode(
+            output_ids[:, input_token_len:],
+            skip_special_tokens=True,
+        )[0]
 
         result = _extract_json(decoded)
 
     except Exception as e:
-        print(f'PULSE-7B inference failed: {e}')
+
+        print(f"PULSE-7B inference failed: {e}")
+
         result = {}
 
-    cls = result.get('rhythm_class', 'NORM').upper().strip()
+    cls = str(
+        result.get("rhythm_class", "NORM")
+    ).upper().strip()
 
     if cls not in ECG_CLASSES:
-        cls = 'NORM'
+        cls = "NORM"
 
     try:
-        confidence = float(result.get('confidence', 0.5))
-        confidence = max(0.0, min(1.0, confidence))
-    except (TypeError, ValueError):
+
+        confidence = float(
+            result.get("confidence", 0.5)
+        )
+
+        confidence = max(
+            0.0,
+            min(1.0, confidence)
+        )
+
+    except Exception:
         confidence = 0.5
 
-    clinical_flags = result.get('clinical_flags', [])
+    clinical_flags = result.get(
+        "clinical_flags",
+        []
+    )
 
     if not isinstance(clinical_flags, list):
-        clinical_flags = [str(clinical_flags)]
+        clinical_flags = [
+            str(clinical_flags)
+        ]
 
     snomed_code, snomed_desc = ECG_SNOMED.get(
         cls,
-        ECG_SNOMED['NORM']
+        ECG_SNOMED["NORM"]
     )
 
     return {
-        'rhythm_class': cls,
-        'confidence': confidence,
-        'all_class_probs': {
-            c: 0.0 for c in ECG_CLASSES
+
+        "rhythm_class": cls,
+
+        "confidence": confidence,
+
+        "all_class_probs": {
+            c: 0.0
+            for c in ECG_CLASSES
         },
-        'snomed_code': snomed_code,
-        'snomed_description': snomed_desc,
-        'clinical_flags': clinical_flags[:4],
-        'reasoning': str(
+
+        "snomed_code": snomed_code,
+
+        "snomed_description": snomed_desc,
+
+        "clinical_flags": clinical_flags[:4],
+
+        "reasoning": str(
             result.get(
-                'reasoning',
-                f'Classified as {cls}'
+                "reasoning",
+                f"Classified as {cls}"
             )
         ),
     }
