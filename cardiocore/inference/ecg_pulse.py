@@ -58,16 +58,20 @@ def _load_model():
 
     from llava.model.builder import load_pretrained_model
     from llava.mm_utils import get_model_name_from_path
+    from transformers import CLIPImageProcessor
 
     model_name = get_model_name_from_path(_MODEL_ID)
+    tokenizer, model, _, context_len = \
+    load_pretrained_model(
+        model_path=_MODEL_ID,
+        model_base=None,
+        model_name=model_name,
+        device="auto",
+    )
 
-    tokenizer, model, image_processor, context_len = \
-        load_pretrained_model(
-            model_path=_MODEL_ID,
-            model_base=None,
-            model_name=model_name,
-            device="auto",
-        )
+    image_processor = CLIPImageProcessor.from_pretrained(
+        "openai/clip-vit-large-patch14-336"
+    )
 
     _MODEL = model
 
