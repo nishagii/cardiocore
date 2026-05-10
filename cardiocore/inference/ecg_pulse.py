@@ -179,7 +179,6 @@ def analyze_ecg_image(image_bytes: bytes) -> dict:
             output_ids = model.generate(
                 input_ids,
                 images=image_tensor,
-                image_sizes=[img.size],
                 do_sample=True,
                 temperature=0.2,
                 top_p=0.9,
