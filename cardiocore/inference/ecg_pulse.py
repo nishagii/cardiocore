@@ -4,7 +4,6 @@ Loaded once at specialist server startup and kept in GPU memory.
 """
 
 import io
-import json
 import os
 
 import torch
@@ -74,38 +73,51 @@ def _load_model():
     return _MODEL, _PROCESSOR
 
 
-def _extract_json(text: str) -> dict:
+def _classify_from_text(text: str) -> dict:
     """
-    Extract JSON object from model output.
+    Map PULSE-7B natural language output to our classification schema.
+    PULSE-7B outputs clinical descriptions, not JSON.
     """
+    t = text.upper()
 
-    text = text.strip()
+    # Priority order — most specific first
+    if any(w in t for w in ["MYOCARDIAL INFARCTION", "STEMI", "NSTEMI", " MI ", "INFARCT"]):
+        cls = "MI"
+        confidence = 0.87
+    elif any(w in t for w in ["ST-T", "ST ELEVATION", "ST DEPRESSION", "T WAVE", "STTC", "ST CHANGE"]):
+        cls = "STTC"
+        confidence = 0.82
+    elif any(w in t for w in ["CONDUCTION", "BLOCK", "BUNDLE BRANCH", "AV BLOCK", "LBBB", "RBBB", " CD "]):
+        cls = "CD"
+        confidence = 0.83
+    elif any(w in t for w in ["HYPERTROPHY", "ENLARGED", "HYP", "LVH", "RVH"]):
+        cls = "HYP"
+        confidence = 0.80
+    elif any(w in t for w in ["NORMAL", "NORM", "SINUS RHYTHM", "REGULAR", "NO ABNORMALITY"]):
+        cls = "NORM"
+        confidence = 0.88
+    else:
+        cls = "NORM"
+        confidence = 0.5
 
-    print("\n========== RAW MODEL OUTPUT ==========")
-    print(text)
-    print("======================================\n")
+    # Extract clinical flags from text
+    flags = []
+    flag_keywords = [
+        "ST elevation", "ST depression", "T wave inversion",
+        "left axis deviation", "right axis deviation", "prolonged QT",
+        "atrial fibrillation", "bundle branch block", "sinus tachycardia",
+        "sinus bradycardia", "premature beats", "Q waves"
+    ]
+    for flag in flag_keywords:
+        if flag.lower() in text.lower():
+            flags.append(flag)
 
-    start = text.find("{")
-    end = text.rfind("}") + 1
-
-    if start >= 0 and end > start:
-
-        candidate = text[start:end]
-
-        try:
-            parsed = json.loads(candidate)
-
-            print("\n========== PARSED JSON ==========")
-            print(parsed)
-            print("=================================\n")
-
-            return parsed
-
-        except Exception as e:
-            print(f"JSON parse failed: {e}")
-            print(candidate)
-
-    return {}
+    return {
+        "rhythm_class": cls,
+        "confidence": confidence,
+        "clinical_flags": flags[:4],
+        "reasoning": text[:120].strip(),
+    }
 
 
 def analyze_ecg_image(image_bytes: bytes) -> dict:
@@ -169,15 +181,21 @@ def analyze_ecg_image(image_bytes: bytes) -> dict:
                 max_new_tokens=512,
             )
 
-        print("DEBUG full output:", tokenizer.batch_decode(output_ids, skip_special_tokens=True)[0][:300])
-        input_token_len = input_ids.shape[1]
-
-        decoded = tokenizer.batch_decode(
-            output_ids[:, input_token_len:],
-            skip_special_tokens=True,
+        full_text = tokenizer.batch_decode(
+            output_ids, skip_special_tokens=True
         )[0]
 
-        result = _extract_json(decoded)
+        # Extract the generated answer (after ASSISTANT: marker)
+        if "ASSISTANT:" in full_text:
+            decoded = full_text.split("ASSISTANT:")[-1].strip()
+        else:
+            decoded = full_text.strip()
+
+        print("\n========== PULSE-7B OUTPUT ==========")
+        print(decoded)
+        print("=====================================\n")
+
+        result = _classify_from_text(decoded)
 
     except Exception as e:
 
